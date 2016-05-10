@@ -93,7 +93,7 @@ def write_block(fd, uint, bs, wrap, last_uint=None):
 
 
 
-def write(file_path, bs=4096, blocks=1000, period=0.01, validate=False,
+def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
           timeout=None, total_blocks=None, log_path=LOGPATH):
     ''' Write data until there is a failure or timeout, wrap at least once '''
     assert bs % 2 == 0
@@ -212,17 +212,20 @@ def main(argv):
     parser = argparse.ArgumentParser(description='Run some IO and be able to detect and validate'
                                      ' failure')
     parser.add_argument('path', help='path to write-to or validate')
-    parser.add_argument('-l', '--log', help='log to write or validate from')
+    parser.add_argument('-l', '--log', help='log to write or validate from. '
+                        ' default=/tmp/dataloss.log')
     parser.add_argument('-v', '--validate', action='store_true',
                         help='validate using logfile provided')
 
     parser.add_argument('--bs', type=int, default=4096, help='block size default=4096')
-    parser.add_argument('--blocks', type=int, default=1000, help='num of blocks before wrapping')
+    parser.add_argument('--blocks', type=int, default=1000, help='num of blocks before wrapping.'
+                        ' default=1000')
     parser.add_argument('-a', '--auto-validate', action='store_true',
                         help='if set, data will be validated while writting takes place')
-    parser.add_argument('--period', type=float, default=0, help='period between writes')
-    parser.add_argument('--timeout', type=float, help='time in seconds to write')
-    parser.add_argument('--total-blocks', type=int, help='total number of blocks to write')
+    parser.add_argument('--period', type=float, help='period between writes. default=0')
+    parser.add_argument('--timeout', type=float, help='time in seconds to write. default=inf')
+    parser.add_argument('--total-blocks', type=int, help='total number of blocks to write'
+                        ' default=inf')
 
     args = parser.parse_args(argv[1:])
     if args.validate:
