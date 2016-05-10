@@ -10,11 +10,16 @@ The idea is that you:
   i.e. a write error)
 - validate that the data written is correct
 
-This script into account that data that has not been acknowledged
+This script takes into account that data that has not been acknowledged
 might be EITHER new or old data, therefore either is considered
 valid.
 
-Use Cntrl+C (SIGINT) to kill this program gracefully
+Use Cntrl+C (SIGINT) to kill this program gracefully.
+
+**returned error codes:**
+- `0`: no errors
+- `1`: write error, probably due to the device itself (DU)
+- `2`: validation error, meaning corrupted data (DL)
 
 # Usage
 ## Ultra Simple Usage
