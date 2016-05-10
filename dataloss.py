@@ -157,6 +157,7 @@ def validate(fd, last_block=None, last_failed=False, bs=4096):
     block = int((last_block + 1) % total_blocks) if last_block is not None else 0
     very_first_uint = None  # the last uint before the block
     start_uint = None
+    finished = False
     while True:
         if kill:
             raise InterruptedError()
@@ -184,6 +185,8 @@ def validate(fd, last_block=None, last_failed=False, bs=4096):
         start_uint = int((data[-1] + 1) % UINT_MAX)
         block = int((block + 1) % total_blocks)
         if block == last_block:
+            finished = True
+        elif finished:
             return
 
 
@@ -238,6 +241,7 @@ def main(argv):
         except WriteError as err:
             print('ERROR:', err)
             sys.exit(1)
+
 
 if __name__ == '__main__':
     main(sys.argv)
