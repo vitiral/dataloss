@@ -5,6 +5,7 @@ from __future__ import print_function
 import sys
 import os
 import time
+from datetime import datetime
 import re
 import struct
 import tempfile
@@ -63,6 +64,10 @@ class WriteError(IOError):
         self.uint = uint
         self.args = prev, block, uint
 
+def log_event(fd, msg):
+    now = time.time()
+    timestamp = 'UTC[{}] LOC[{}] '.format(datetime.utcfromtimestamp(now), datetime.fromtimestamp(now))
+    fd.write(timestamp + msg + '\n')
 
 def get_uints(start, end, wrap):
     ''' get a series of uints wrapped at wrap '''
@@ -116,15 +121,15 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
     last_uint = None
     wrapped = False
     with open(file_path, 'wb+', bs) as fd, open(log_path, 'w', 1) as logfile:
-        logfile.write(SETTINGS_MSG.format(file_path, bs) + '\n')
+        log_event(logfile, SETTINGS_MSG.format(file_path, bs))
         while True:
             try:
                 write_block(fd, uint, bs, UINT_MAX, block, last_uint)
             except IncorrectBlockError as e:
-                logfile.write(INVALID_BLOCK_MSG.format(block) + '\n')
+                log_event(logfile, INVALID_BLOCK_MSG.format(block))
                 raise
             except IOError as err:
-                logfile.write(IO_ERROR_MSG.format(block) + '\n')
+                log_event(logfile, IO_ERROR_MSG.format(block))
                 raise WriteError(err, block, uint)
 
             # exit if done
@@ -143,7 +148,7 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
             block += 1
             if block >= blocks:
                 if not wrapped:
-                    logfile.write(WRAPPED_MSG + '\n')
+                    log_event(logfile, WRAPPED_MSG)
                     wrapped = True
                     last_uint = 0 if validate else None
                 block = 0
@@ -151,9 +156,9 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
             if period:
                 time.sleep(period)
         if kill:
-            logfile.write(KILLED_MSG.format(block) + '\n')
+            log_event(logfile, KILLED_MSG.format(block) + '\n')
         else:
-            logfile.write(SUCCESS_MSG.format(block) + '\n')
+            log_event(logfile, SUCCESS_MSG.format(block) + '\n')
     return block
 
 
