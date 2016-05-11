@@ -22,18 +22,19 @@ LOGPATH = os.path.join(tmpdir, 'dataloss.log')
 UINT_MAX = 2**16
 ENDIAN = '>'
 
-FAILED_MSG = 'Failed at block: {}'
-LAST_MSG = 'Last block: {}'
 SETTINGS_MSG = '- Settings: {} {}'
 WRAPPED_MSG = '- Wrapped'
+BLOCK_MSG = 'block: {}'
+FAILED_MSG = 'Failed at ' + BLOCK_MSG
+LAST_MSG = 'Last ' + BLOCK_MSG
 INVALID_BLOCK_MSG = '- Invalid block. ' + FAILED_MSG
 IO_ERROR_MSG = '- IO Error. ' + FAILED_MSG
 SUCCESS_MSG = '- Success. ' + LAST_MSG
 KILLED_MSG = '- Killed. ' + LAST_MSG
 
 SETTINGS_PAT = re.compile(SETTINGS_MSG.format(r'(.*)', r'(\d+)' + '\n'))
-FAILED_PAT = re.compile(FAILED_MSG.format('(\d+)'))
-SUCCESS_PAT = re.compile(LAST_MSG.format('(\d+)'))
+IO_ERROR_PAT = re.compile(IO_ERROR_MSG.format('(\d+)'))
+BLOCK_PAT = re.compile(BLOCK_MSG.format('(\d+)'))
 
 
 # SIGINT sets kill to True
@@ -55,11 +56,12 @@ class IncorrectBlockError(IOError):
 
 class WriteError(IOError):
     ''' Write failed '''
-    def __init__(self, block, uint):
+    def __init__(self, prev, block, uint):
         super(WriteError, self).__init__()
+        self.prev = prev
         self.block = block
         self.uint = uint
-        self.args = block, uint
+        self.args = prev, block, uint
 
 
 def get_uints(start, end, wrap):
@@ -96,7 +98,6 @@ def write_block(fd, uint, bs, wrap, block, last_uint=None):
     return last_uint
 
 
-
 def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
           timeout=None, total_blocks=None, log_path=LOGPATH):
     ''' Write data until there is a failure or timeout, wrap at least once '''
@@ -115,9 +116,9 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
             except IncorrectBlockError as e:
                 logfile.write(INVALID_BLOCK_MSG.format(block) + '\n')
                 raise
-            except IOError:
+            except IOError as err:
                 logfile.write(IO_ERROR_MSG.format(block) + '\n')
-                raise WriteError(block, uint)
+                raise WriteError(err, block, uint)
 
             # exit if done
             if total_blocks is not None:
@@ -149,7 +150,7 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
     return block
 
 
-def validate(fd, last_block=None, last_failed=False, bs=4096):
+def validate(fd, last_block=None, io_error=False, bs=4096):
     ''' validate data given the last block to be written and whether it failed '''
     file_size = os.path.getsize(fd.name)
     assert file_size % bs == 0
@@ -172,7 +173,7 @@ def validate(fd, last_block=None, last_failed=False, bs=4096):
         else:
             expected = tuple(get_uints(start_uint, start_uint + int(bs / 2), UINT_MAX))
             if data != expected:
-                if last_failed and last_block == block:
+                if io_error and last_block == block:
                     # spot where there was a failure, it is possible the data was not written
                     failed_uint = very_first_uint - int(bs / 2)
                     if failed_uint < 0:
@@ -202,14 +203,14 @@ def validate_log(log_path):
     wrapped = re.search(WRAPPED_MSG, log_txt)
     assert wrapped
 
-    failed = FAILED_PAT.search(log_txt)
-    if failed:
-        block = failed.group(1)
+    io_error = IO_ERROR_PAT.search(log_txt)
+    if io_error:
+        block = io_error.group(1)
     else:
-        block = SUCCESS_PAT.search(log_txt).group(1)
+        block = BLOCK_PAT.search(log_txt).group(1)
     block = int(block)
     with open(path, 'rb') as fd:
-        validate(fd, last_block=block, last_failed=bool(failed), bs=bs)
+        validate(fd, last_block=block, io_error=bool(io_error), bs=bs)
 
 
 def main(argv):
@@ -232,21 +233,26 @@ def main(argv):
                         ' default=inf')
 
     args = parser.parse_args(argv[1:])
+    logpath = args.log or LOGPATH
     if args.validate:
         try:
-            validate_log(args.log or LOGPATH)
+            validate_log(logpath)
         except IncorrectBlockError as err:
-            print('ERROR:', repr(err))
+            print('ERROR:', err, file=sys.stderr)
             sys.exit(2)
+        except Exception as err:
+            print('ERROR: log at', logpath, 'is not complete:',
+                  repr(err), file=sys.stderr)
+            sys.exit(3)
     else:
         try:
             write(args.path, args.bs, args.blocks, args.period, args.auto_validate,
-                  args.timeout, args.total_blocks, args.log or LOGPATH)
+                  args.timeout, args.total_blocks, logpath)
         except IncorrectBlockError as err:
-            print('ERROR:', repr(err))
+            print('ERROR:', err, file=sys.stderr)
             sys.exit(2)
         except WriteError as err:
-            print('ERROR:', repr(err))
+            print('ERROR:', repr(err), file=sys.stderr)
             sys.exit(1)
 
 if __name__ == '__main__':
