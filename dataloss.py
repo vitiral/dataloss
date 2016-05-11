@@ -1,3 +1,7 @@
+#!/usr/bin/python
+
+from __future__ import print_function
+
 import sys
 import os
 import time
@@ -69,23 +73,23 @@ def get_bytes(start, end, wrap):
     return struct.pack(ENDIAN + str(int(end - start)) + 'H', *uints)
 
 
-def validate_block(fd, bs, wrap, uint):
+def validate_block(fd, bs, wrap, block, uint):
     ''' validate the block given the uint at the beginning'''
     new_uint = uint + int(bs / 2)
     expected = get_bytes(uint, new_uint, wrap)
     result = fd.read(bs)
     if not expected == result:
-        err = IncorrectBlockError()
+        err = IncorrectBlockError('block=' + str(block))
         err.result, err.expected = result, expected
         raise err
     return new_uint
 
 
-def write_block(fd, uint, bs, wrap, last_uint=None):
+def write_block(fd, uint, bs, wrap, block, last_uint=None):
     ''' write a block. If last_uint is not None, validate before overwritting '''
     if last_uint is not None:
         loc = fd.tell()
-        last_uint = validate_block(fd, bs, wrap, last_uint)
+        last_uint = validate_block(fd, bs, wrap, block, last_uint)
         fd.seek(loc)
     fd.write(get_bytes(uint, uint + int(bs / 2), wrap))
     os.fsync(fd)
@@ -107,7 +111,7 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
         logfile.write(SETTINGS_MSG.format(file_path, bs) + '\n')
         while True:
             try:
-                write_block(fd, uint, bs, UINT_MAX, last_uint)
+                write_block(fd, uint, bs, UINT_MAX, block, last_uint)
             except IncorrectBlockError as e:
                 logfile.write(INVALID_BLOCK_MSG.format(block) + '\n')
                 raise
@@ -175,13 +179,13 @@ def validate(fd, last_block=None, last_failed=False, bs=4096):
                         failed_uint += UINT_MAX
                     expected_failed = get_uints(failed_uint, failed_uint + int(bs / 2), UINT_MAX)
                     if data != expected_failed:
-                        err = IncorrectBlockError("invalid failed block")
+                        err = IncorrectBlockError('failed-block=' + str(block))
                         err.result, err.expected, err.possible = data, expected, expected_failed
                         raise err
                 else:
-                    err = IncorrectBlockError()
+                    err = IncorrectBlockError('block=' + str(block))
                     err.result, err.expected = data, expected
-                    raise err
+                    raise err 
         start_uint = int((data[-1] + 1) % UINT_MAX)
         block = int((block + 1) % total_blocks)
         if block == last_block:
@@ -230,21 +234,20 @@ def main(argv):
     args = parser.parse_args(argv[1:])
     if args.validate:
         try:
-            validate_log(args.log)
+            validate_log(args.log or LOGPATH)
         except IncorrectBlockError as err:
-            print('ERROR:', err)
+            print('ERROR:', repr(err))
             sys.exit(2)
     else:
         try:
             write(args.path, args.bs, args.blocks, args.period, args.auto_validate,
-                args.timeout, args.total_blocks, args.log)
+                  args.timeout, args.total_blocks, args.log or LOGPATH)
         except IncorrectBlockError as err:
-            print('ERROR:', err)
+            print('ERROR:', repr(err))
             sys.exit(2)
         except WriteError as err:
-            print('ERROR:', err)
+            print('ERROR:', repr(err))
             sys.exit(1)
-
 
 if __name__ == '__main__':
     main(sys.argv)
