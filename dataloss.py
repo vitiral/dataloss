@@ -206,6 +206,7 @@ def validate(fd, last_block, io_error=False, bs=4096):
 
 
 def validate_log(log_path):
+    ''' given a log file, validate the data '''
     with open(log_path, 'r') as fd:
         log_txt = fd.read()
     path, bs = SETTINGS_PAT.search(log_txt).groups()
