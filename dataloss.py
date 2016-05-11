@@ -100,7 +100,14 @@ def write_block(fd, uint, bs, wrap, block, last_uint=None):
 
 def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
           timeout=None, total_blocks=None, log_path=LOGPATH):
-    ''' Write data until there is a failure or timeout, wrap at least once '''
+    ''' Write data until there is a failure or timeout, wrap at least once.
+
+    This function uses an ultra simple method to write blocks, simply writing sequential
+    uint_16t values and keeping track of which block it is writing to.
+
+    The operation of this function is kept in a log, and from that log the data that was
+    written can be validated.
+    '''
     assert bs % 2 == 0
     start = time.time()
     uint = 0
@@ -150,7 +157,7 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
     return block
 
 
-def validate(fd, last_block=None, io_error=False, bs=4096):
+def validate(fd, last_block, io_error=False, bs=4096):
     ''' validate data given the last block to be written and whether it failed '''
     file_size = os.path.getsize(fd.name)
     assert file_size % bs == 0
@@ -158,40 +165,43 @@ def validate(fd, last_block=None, io_error=False, bs=4096):
     total_blocks = int(file_size / bs)
     struct_fmt = ENDIAN + str(int(bs / 2)) + 'H'
 
-    # the first block to check is the block after the failed block
-    block = int((last_block + 1) % total_blocks) if last_block is not None else 0
+    # the block after the failed block is the "start" of the uint sequences
+    block = int((last_block + 1) % total_blocks)
     very_first_uint = None  # the last uint before the block
     start_uint = None
-    finished = False
+    almost_finished = False
     while True:
         if kill:
             raise InterruptedError()
         fd.seek(block * bs)
         data = struct.unpack(struct_fmt, fd.read(bs))
         if very_first_uint is None:
+            # this is the first loop, use the first uint to
+            # load the state
             very_first_uint = data[0]
-        else:
-            expected = tuple(get_uints(start_uint, start_uint + int(bs / 2), UINT_MAX))
-            if data != expected:
-                if io_error and last_block == block:
-                    # spot where there was a failure, it is possible the data was not written
-                    failed_uint = very_first_uint - int(bs / 2)
-                    if failed_uint < 0:
-                        failed_uint += UINT_MAX
-                    expected_failed = get_uints(failed_uint, failed_uint + int(bs / 2), UINT_MAX)
-                    if data != expected_failed:
-                        err = IncorrectBlockError('failed-block=' + str(block))
-                        err.result, err.expected, err.possible = data, expected, expected_failed
-                        raise err
-                else:
-                    err = IncorrectBlockError('block=' + str(block))
-                    err.result, err.expected = data, expected
-                    raise err 
+            start_uint = very_first_uint
+
+        expected = tuple(get_uints(start_uint, start_uint + int(bs / 2), UINT_MAX))
+        if data != expected:
+            if io_error and last_block == block:
+                # spot where there was an io-error. It is possible the data was not written
+                failed_uint = very_first_uint - int(bs / 2)
+                if failed_uint < 0:
+                    failed_uint += UINT_MAX
+                expected_failed = get_uints(failed_uint, failed_uint + int(bs / 2), UINT_MAX)
+                if data != expected_failed:
+                    err = IncorrectBlockError('failed-block=' + str(block))
+                    err.result, err.expected, err.possible = data, expected, expected_failed
+                    raise err
+            else:
+                err = IncorrectBlockError('block=' + str(block))
+                err.result, err.expected = data, expected
+                raise err
         start_uint = int((data[-1] + 1) % UINT_MAX)
         block = int((block + 1) % total_blocks)
         if block == last_block:
-            finished = True
-        elif finished:
+            almost_finished = True
+        elif almost_finished:
             return
 
 
