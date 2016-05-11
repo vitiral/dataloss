@@ -1,14 +1,13 @@
 # dataloss: detecting data loss
 
 This is a short python script who's purpose is to detect
-both long running and instantanious data lass on a high
+both long running and instantanious data loss on a high
 availibility system.
 
 The idea is that you:
 - run this script on an external client, writing data to the system
-- do something to the system that might cause DU (data unavailable,
-  i.e. a write error)
-- validate that the data written is correct
+- do something terrible to the system that might cause DU (like reboot hardware)
+- validate that the data written is still correct
 
 This script takes into account that data that has not been acknowledged
 might be EITHER new or old data, therefore either is considered
