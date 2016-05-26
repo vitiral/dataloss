@@ -113,7 +113,7 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
     The operation of this function is kept in a log, and from that log the data that was
     written can be validated.
     '''
-    assert bs % 2 == 0
+    assert bs % 1024 == 0, "bs must be divisible by 1024"
     start = time.time()
     uint = 0
     block = 0
@@ -121,6 +121,7 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
     last_uint = None
     wrapped = False
     with open(file_path, 'wb+', bs) as fd, open(log_path, 'w', 1) as logfile:
+        log_event(logfile, "- PID: {}".format(os.getpid()))
         log_event(logfile, SETTINGS_MSG.format(file_path, bs))
         while True:
             try:
@@ -165,8 +166,8 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
 def validate(fd, last_block, io_error=False, bs=4096):
     ''' validate data given the last block to be written and whether it failed '''
     file_size = os.path.getsize(fd.name)
-    assert file_size % bs == 0
-    assert bs % 2 == 0
+    assert file_size % bs == 0, "file_size must be divisible by bs"
+    assert bs % 1024 == 0, "bs must be divisible by 1024"
     total_blocks = int(file_size / bs)
     struct_fmt = ENDIAN + str(int(bs / 2)) + 'H'
 
@@ -177,7 +178,7 @@ def validate(fd, last_block, io_error=False, bs=4096):
     almost_finished = False
     while True:
         if kill:
-            raise InterruptedError()
+            raise KeyboardInterrupt()
         fd.seek(block * bs)
         data = struct.unpack(struct_fmt, fd.read(bs))
         if very_first_uint is None:
