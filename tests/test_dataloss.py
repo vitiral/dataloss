@@ -33,6 +33,8 @@ class TestHelpers(unittest.TestCase):
 class TestDataloss(unittest.TestCase):
     def setUp(self):
         self.fname = tempfile.mktemp()
+        with open(self.fname, "w"):
+            pass
         self.flog = tempfile.mktemp()
 
     def tearDown(self):
@@ -47,8 +49,12 @@ class TestDataloss(unittest.TestCase):
         block = dataloss.write(
             self.fname, blocks=num_blocks, period=0, validate=True,
             total_blocks=int(num_blocks * 9.3), log_path=self.flog)
-        with open(self.fname, 'rb') as fd:
-            dataloss.validate(fd, block)
+
+        fd = os.open(self.fname, os.O_RDWR)
+        try:
+            dataloss.validate(fd, num_blocks, block)
+        finally:
+            os.close(fd)
         dataloss.validate_log(self.flog)
 
     def test_corrupt(self):
@@ -58,26 +64,43 @@ class TestDataloss(unittest.TestCase):
             self.fname, bs=bs, blocks=num_blocks, period=0, validate=True,
             total_blocks=int(num_blocks * 9.3), log_path=self.flog)
         # validate it is correct
-        with open(self.fname, 'rb') as fd:
-            dataloss.validate(fd, block)
+        fd = os.open(self.fname, os.O_RDWR)
+        try:
+            dataloss.validate(fd, num_blocks, block)
+        finally:
+            os.close(fd)
         seekto = block * bs + 10  # do at least one inside the block
         for _ in range(5):
             # corrupt the data a tiny bit
-            with open(self.fname, 'rb+') as fd:
-                fd.seek(seekto)
-                value = ord(fd.read(1))
-                fd.seek(seekto)
-                fd.write(bytearray([int((value + 1) % 255)]))
+            fd = os.open(self.fname, os.O_RDWR)
+            try:
+                os.lseek(fd, seekto, os.SEEK_SET)
+                value = ord(os.read(fd, 1))
+                os.lseek(fd, seekto, os.SEEK_SET)
+                os.write(fd, bytearray([int((value + 1) % 255)]))
                 os.fsync(fd)
+            finally:
+                os.close(fd)
+
             with self.assertRaises(dataloss.IncorrectBlockError):
-                with open(self.fname, 'rb') as fd:
-                    dataloss.validate(fd, block)
-            with open(self.fname, 'rb+') as fd:
-                fd.seek(seekto)
-                fd.write(bytearray([value]))
+                fd = os.open(self.fname, os.O_RDWR)
+                try:
+                    dataloss.validate(fd, num_blocks, block)
+                finally:
+                    os.close(fd)
+            fd = os.open(self.fname, os.O_RDWR)
+            try:
+                os.lseek(fd, seekto, os.SEEK_SET)
+                os.write(fd, bytearray([value]))
                 os.fsync(fd)
-            with open(self.fname, 'rb') as fd:
-                dataloss.validate(fd, block)
+            finally:
+                os.close(fd)
+
+            fd = os.open(self.fname, os.O_RDWR)
+            try:
+                dataloss.validate(fd, num_blocks, block)
+            finally:
+                os.close(fd)
             seekto = random.randint(0, (num_blocks - 1) * 4096)
 
     def test_simultanious_corrupt(self):
@@ -87,12 +110,15 @@ class TestDataloss(unittest.TestCase):
         def corrupt():
             ''' corrupt the file in a separate thread '''
             time.sleep(0.1)
-            with open(self.fname, 'wb+') as fd:
+            fd = os.open(self.fname, os.O_RDWR)
+            try:
                 while not kill:
                     time.sleep(0.05)
-                    fd.seek(random.randint(0, (num_blocks - 1) * bs))
-                    fd.write(bytearray([random.randint(0, 255)]))
+                    os.lseek(fd, random.randint(0, (num_blocks - 1) * bs), os.SEEK_SET)
+                    os.write(fd, bytearray([random.randint(0, 255)]))
                     os.fsync(fd)
+            finally:
+                os.close(fd)
 
         corruptor = threading.Thread(target=corrupt)
         corruptor.start()

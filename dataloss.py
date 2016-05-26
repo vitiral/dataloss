@@ -23,7 +23,7 @@ LOGPATH = os.path.join(tmpdir, 'dataloss.log')
 UINT_MAX = 2**16
 ENDIAN = '>'
 
-SETTINGS_MSG = '- Settings: {} {}'
+SETTINGS_MSG = '- Settings: path={} bs={} size={}'
 WRAPPED_MSG = '- Wrapped'
 BLOCK_MSG = 'block: {}'
 FAILED_MSG = 'Failed at ' + BLOCK_MSG
@@ -33,7 +33,7 @@ IO_ERROR_MSG = '- IO Error. ' + FAILED_MSG
 SUCCESS_MSG = '- Success. ' + LAST_MSG
 KILLED_MSG = '- Killed. ' + LAST_MSG
 
-SETTINGS_PAT = re.compile(SETTINGS_MSG.format(r'(.*)', r'(\d+)' + '\n'))
+SETTINGS_PAT = re.compile(SETTINGS_MSG.format(r'(.*)', r'(\d+)', r'(\d+)\n'))
 IO_ERROR_PAT = re.compile(IO_ERROR_MSG.format('(\d+)'))
 BLOCK_PAT = re.compile(BLOCK_MSG.format('(\d+)'))
 
@@ -84,7 +84,7 @@ def validate_block(fd, bs, wrap, block, uint):
     ''' validate the block given the uint at the beginning'''
     new_uint = uint + int(bs / 2)
     expected = get_bytes(uint, new_uint, wrap)
-    result = fd.read(bs)
+    result = os.read(fd, bs)
     if not expected == result:
         err = IncorrectBlockError('block=' + str(block))
         err.result, err.expected = result, expected
@@ -95,10 +95,10 @@ def validate_block(fd, bs, wrap, block, uint):
 def write_block(fd, uint, bs, wrap, block, last_uint=None):
     ''' write a block. If last_uint is not None, validate before overwritting '''
     if last_uint is not None:
-        loc = fd.tell()
+        loc = os.lseek(fd, 0, os.SEEK_CUR)
         last_uint = validate_block(fd, bs, wrap, block, last_uint)
-        fd.seek(loc)
-    fd.write(get_bytes(uint, uint + int(bs / 2), wrap))
+        os.lseek(fd, loc, os.SEEK_SET)
+    os.write(fd, get_bytes(uint, uint + int(bs / 2), wrap))
     os.fsync(fd)
     return last_uint
 
@@ -120,9 +120,12 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
     blocks_written = 0
     last_uint = None
     wrapped = False
-    with open(file_path, 'wb+', bs) as fd, open(log_path, 'w', 1) as logfile:
+    logfile = open(log_path, 'w', 1)
+    fd = os.open(file_path, os.O_RDWR)
+    # with open(file_path, 'wb+', bs) as fd, open(log_path, 'w', 1) as logfile:
+    try:
         log_event(logfile, "- PID: {}".format(os.getpid()))
-        log_event(logfile, SETTINGS_MSG.format(file_path, bs))
+        log_event(logfile, SETTINGS_MSG.format(file_path, bs, blocks))
         while True:
             try:
                 write_block(fd, uint, bs, UINT_MAX, block, last_uint)
@@ -153,22 +156,23 @@ def write(file_path, bs=4096, blocks=1000, period=None, validate=False,
                     wrapped = True
                     last_uint = 0 if validate else None
                 block = 0
-                fd.seek(0)
+                os.lseek(fd, 0, os.SEEK_SET)
             if period:
                 time.sleep(period)
         if kill:
             log_event(logfile, KILLED_MSG.format(block) + '\n')
         else:
             log_event(logfile, SUCCESS_MSG.format(block) + '\n')
+    finally:
+        os.close(fd)
+        logfile.close()
     return block
 
 
-def validate(fd, last_block, io_error=False, bs=4096):
+def validate(fd, total_blocks, last_block, io_error=False, bs=4096):
     ''' validate data given the last block to be written and whether it failed '''
-    file_size = os.path.getsize(fd.name)
-    assert file_size % bs == 0, "file_size must be divisible by bs"
+    assert isinstance(fd, int)
     assert bs % 1024 == 0, "bs must be divisible by 1024"
-    total_blocks = int(file_size / bs)
     struct_fmt = ENDIAN + str(int(bs / 2)) + 'H'
 
     # the block after the failed block is the "start" of the uint sequences
@@ -179,8 +183,8 @@ def validate(fd, last_block, io_error=False, bs=4096):
     while True:
         if kill:
             raise KeyboardInterrupt()
-        fd.seek(block * bs)
-        data = struct.unpack(struct_fmt, fd.read(bs))
+        os.lseek(fd, block * bs, os.SEEK_SET)
+        data = struct.unpack(struct_fmt, os.read(fd, bs))
         if very_first_uint is None:
             # this is the first loop, use the first uint to
             # load the state
@@ -215,7 +219,7 @@ def validate_log(log_path):
     ''' given a log file, validate the data '''
     with open(log_path, 'r') as fd:
         log_txt = fd.read()
-    path, bs = SETTINGS_PAT.search(log_txt).groups()
+    path, bs, total_blocks = SETTINGS_PAT.search(log_txt).groups()
     bs = int(bs)
     wrapped = re.search(WRAPPED_MSG, log_txt)
     assert wrapped
@@ -226,8 +230,12 @@ def validate_log(log_path):
     else:
         block = BLOCK_PAT.search(log_txt).group(1)
     block = int(block)
-    with open(path, 'rb') as fd:
-        validate(fd, last_block=block, io_error=bool(io_error), bs=bs)
+    total_blocks = int(total_blocks)
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        validate(fd, total_blocks, last_block=block, io_error=bool(io_error), bs=bs)
+    finally:
+        os.close(fd)
 
 
 def main(argv):
