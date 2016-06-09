@@ -95,9 +95,8 @@ def validate_block(fd, bs, wrap, block, uint):
 def write_block(fd, uint, bs, wrap, block, last_uint=None):
     ''' write a block. If last_uint is not None, validate before overwritting '''
     if last_uint is not None:
-        loc = os.lseek(fd, 0, os.SEEK_CUR)
         last_uint = validate_block(fd, bs, wrap, block, last_uint)
-        os.lseek(fd, loc, os.SEEK_SET)
+        os.lseek(fd, -bs, os.SEEK_CUR)
     os.write(fd, get_bytes(uint, uint + int(bs / 2), wrap))
     os.fsync(fd)
     return last_uint
@@ -184,7 +183,8 @@ def validate(fd, total_blocks, last_block, io_error=False, bs=4096):
         if kill:
             raise KeyboardInterrupt()
         os.lseek(fd, block * bs, os.SEEK_SET)
-        data = struct.unpack(struct_fmt, os.read(fd, bs))
+        raw = os.read(fd, bs)
+        data = struct.unpack(struct_fmt, raw)
         if very_first_uint is None:
             # this is the first loop, use the first uint to
             # load the state
