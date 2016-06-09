@@ -220,9 +220,7 @@ def validate_log(log_path):
     with open(log_path, 'r') as fd:
         log_txt = fd.read()
     path, bs, total_blocks = SETTINGS_PAT.search(log_txt).groups()
-    bs = int(bs)
-    wrapped = re.search(WRAPPED_MSG, log_txt)
-    assert wrapped
+    bs, total_blocks = int(bs), int(total_blocks)
 
     io_error = IO_ERROR_PAT.search(log_txt)
     if io_error:
@@ -230,7 +228,10 @@ def validate_log(log_path):
     else:
         block = BLOCK_PAT.search(log_txt).group(1)
     block = int(block)
-    total_blocks = int(total_blocks)
+
+    if not re.search(WRAPPED_MSG, log_txt):
+        # if we have not wrapped then we have only written to index block
+        total_blocks = block + 1
     fd = os.open(path, os.O_RDONLY)
     try:
         validate(fd, total_blocks, last_block=block, io_error=bool(io_error), bs=bs)
